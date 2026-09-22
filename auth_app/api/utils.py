@@ -28,3 +28,9 @@ def create_login_response(user):
         },
     }
     return Response(data, status=status.HTTP_200_OK)
+
+
+def delete_jwt_cookies(response):
+    """Delete access and refresh token cookies."""
+    response.delete_cookie('access_token')
+    response.delete_cookie('refresh_token')
