@@ -2,6 +2,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 
 
 class RegistrationSerializer(serializers.ModelSerializer):
@@ -50,6 +51,6 @@ class LoginSerializer(serializers.Serializer):
             password=data.get('password')
         )
         if not user:
-            raise serializers.ValidationError("Invalid username or password.")
+            raise AuthenticationFailed("Invalid username or password.")
         data['user'] = user
         return data

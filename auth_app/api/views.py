@@ -28,6 +28,7 @@ class RegistrationView(APIView):
 class LoginView(APIView):
     """View for user login."""
 
+    authentication_classes = [CookieJWTAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
