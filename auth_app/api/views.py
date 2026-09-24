@@ -2,11 +2,19 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from .serializers import RegistrationSerializer, LoginSerializer
-from .utils import set_jwt_cookies, create_login_response, delete_jwt_cookies
-from .authentication import CookieJWTAuthentication
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from .authentication import CookieJWTAuthentication
+from .serializers import LoginSerializer, RegistrationSerializer
+from .utils import (
+    create_login_response,
+    create_refresh_error_response,
+    create_refresh_response,
+    delete_jwt_cookies,
+    get_valid_refresh_token,
+    set_jwt_cookies,
+)
 
 
 class RegistrationView(APIView):
@@ -64,3 +72,28 @@ class LogoutView(APIView):
         )
         delete_jwt_cookies(response)
         return response
+
+
+class TokenRefreshView(APIView):
+    """View for refreshing the access token."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        """Refresh the access token using the refresh token cookie."""
+        refresh_token = request.COOKIES.get('refresh_token')
+
+        if not refresh_token:
+            return create_refresh_error_response(
+                'Refresh token not provided.'
+            )
+
+        try:
+            refresh = get_valid_refresh_token(refresh_token)
+        except TokenError:
+            return create_refresh_error_response(
+                'Invalid or expired refresh token.'
+            )
+
+        return create_refresh_response(refresh)
