@@ -80,17 +80,12 @@ class TokenRefreshView(APIView):
     def post(self, request):
         """Refresh the access token using the refresh token cookie."""
         refresh_token = request.COOKIES.get('refresh_token')
-
         if not refresh_token:
-            return create_refresh_error_response(
-                'Refresh token not provided.'
-            )
-
+            return create_refresh_error_response('Refresh token not provided.')
         try:
             refresh = get_valid_refresh_token(refresh_token)
         except TokenError:
             return create_refresh_error_response(
                 'Invalid or expired refresh token.'
             )
-
         return create_refresh_response(refresh)
