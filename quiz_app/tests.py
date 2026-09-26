@@ -1,6 +1,8 @@
+import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.template import response
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
@@ -45,6 +47,10 @@ class QuestionValidationTests(SimpleTestCase):
     def test_rejects_wrong_question_count(self):
         """Reject a quiz with fewer than ten questions."""
         data = {'questions': []}
+        data.update({
+            'title': 'Testquiz',
+            'description': 'Ein Quiz für die Validierungstests.',
+        })
 
         with self.assertRaisesMessage(ValueError, 'invalid number of questions'):
             validate_questions(data)
@@ -57,6 +63,10 @@ class QuestionValidationTests(SimpleTestCase):
             'answer': 'Sprache',
         }
         data = {'questions': [question.copy() for _ in range(10)]}
+        data.update({
+            'title': 'Testquiz',
+            'description': 'Ein Quiz für die Validierungstests.',
+        })
         validate_questions(data)
 
 
@@ -68,13 +78,29 @@ class GeminiGenerationTests(SimpleTestCase):
     def test_generate_questions_returns_gemini_questions(
         self, mock_client, mock_validate
     ):
-        """Return generated questions after validation."""
-        questions = [{'question_title': 'Testfrage'}]
-        mock_client.return_value.__enter__.return_value.models.generate_content.return_value.text = (
-            '{"questions": [{"question_title": "Testfrage"}]}'
-        )
-        self.assertEqual(generate_questions('Testtranskript'), questions)
-        mock_validate.assert_called_once()
+        """Return complete quiz data after validation."""
+        quiz_data = {
+            'title': 'Python-Grundlagen',
+            'description': 'Ein Quiz über Python.',
+            'questions': [{'question_title': 'Testfrage'}],
+        }
+
+        gemini = mock_client.return_value.__enter__.return_value
+        gemini.models.generate_content.return_value.text = json.dumps(
+            quiz_data)
+
+        self.assertEqual(generate_questions('Testtranskript'), quiz_data)
+        mock_validate.assert_called_once_with(quiz_data)
+
+    def test_validate_questions_rejects_empty_quiz_details(self):
+        """Reject empty generated titles and descriptions."""
+        data = {'title': 'Quiz', 'description': 'Beschreibung', 'questions': []}
+        for field in ('title', 'description'):
+            with self.subTest(field=field):
+                data[field] = '  '
+                with self.assertRaisesRegex(ValueError, f'invalid {field}'):
+                    validate_questions(data)
+                data[field] = 'CorrectText'
 
 
 class QuizCreationTests(TestCase):
@@ -96,12 +122,21 @@ class QuizCreationTests(TestCase):
             'question_options': ['Sprache', 'Framework', 'Browser', 'Datenbank'],
             'answer': 'Sprache',
         }
-        mock_generate.return_value = [question.copy() for _ in range(10)]
+        mock_generate.return_value = {
+            'title': 'Python-Grundlagen',
+            'description': 'Ein Quiz über die Grundlagen von Python.',
+            'questions': [question.copy() for _ in range(10)],
+        }
         response = self.client.post(
             '/api/quizzes/',
             {'url': 'https://www.youtube.com/watch?v=y3CBt6i0qYw'},
         )
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['title'], 'Python-Grundlagen')
+        self.assertEqual(
+            response.data['description'],
+            'Ein Quiz über die Grundlagen von Python.',
+        )
         self.assertEqual(Quiz.objects.filter(user=self.user).count(), 1)
         self.assertEqual(Question.objects.count(), 10)
         self.assertEqual(len(response.data['questions']), 10)
@@ -156,7 +191,11 @@ class QuizSavingTests(TestCase):
         mock_create.side_effect = RuntimeError('Saving failed')
 
         with self.assertRaises(RuntimeError):
-            save_quiz(user, 'https://youtu.be/y3CBt6i0qYw', [{}])
+            save_quiz(user, 'https://youtu.be/y3CBt6i0qYw', {
+                'title': 'Testquiz',
+                'description': 'Testbeschreibung',
+                'questions': [{}],
+            })
 
         self.assertEqual(Quiz.objects.count(), 0)
         self.assertEqual(Question.objects.count(), 0)
@@ -253,7 +292,7 @@ class QuizAccessTests(TestCase):
         client = APIClient()
         client.force_authenticate(user=other)
         response = client.get(f'/api/quizzes/{quiz.id}/')
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 403)
 
 
 class QuizListTests(TestCase):
@@ -306,6 +345,8 @@ class QuizListTests(TestCase):
             {'title': 'Geändertes Quiz'},
         )
 
+        self.assertEqual(response.data['title'], 'Geändertes Quiz')
+        self.assertIn('questions', response.data)
         self.assertEqual(response.status_code, 200)
         quiz.refresh_from_db()
         self.assertEqual(quiz.title, 'Geändertes Quiz')
@@ -334,7 +375,7 @@ class QuizListTests(TestCase):
             {'title': 'Manipuliert'},
         )
 
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 403)
         quiz.refresh_from_db()
         self.assertEqual(quiz.title, 'Fremdes Quiz')
 
@@ -350,5 +391,24 @@ class QuizListTests(TestCase):
 
         response = self.client.delete(f'/api/quizzes/{quiz.id}/')
 
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 403)
         self.assertTrue(Quiz.objects.filter(id=quiz.id).exists())
+
+
+class QuizCookieIntegrationTests(TestCase):
+    """Test cookie authentication across auth and quiz APIs."""
+
+    def test_login_cookie_allows_quiz_access(self):
+        """Access the quiz API using the cookie from login."""
+        get_user_model().objects.create_user(
+            username='cookieuser', password='test-password-123'
+        )
+        client = APIClient()
+        login = client.post(
+            '/api/login/',
+            {'username': 'cookieuser', 'password': 'test-password-123'},
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertIn('access_token', client.cookies)
+        response = client.get('/api/quizzes/')
+        self.assertEqual(response.status_code, 200)

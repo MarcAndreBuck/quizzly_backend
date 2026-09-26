@@ -15,19 +15,17 @@ def get_gemini_client():
 
 
 def build_quiz_prompt(transcript, question_count=10):
-    """Build the prompt for generating quiz questions."""
-    prompt = (
-        f"Create exactly {question_count} quiz questions based on the transcript below. "
-        "Each question must have exactly 4 answer options and one correct answer. "
-        "Use only information contained in the transcript. "
-        "Return the questions in German.\n\n"
-        'Return a JSON object with a "questions" array. '
-        'Each question must contain "question_title", '
-        '"question_options" (an array of 4 strings), '
-        'and "answer" (the exact text of the correct option). '
+    """Build a prompt for quiz details and questions."""
+    return (
+        f"Create a German quiz with exactly {question_count} questions. "
+        "Use only information from the transcript. "
+        "Return a JSON object with 'title', 'description' and 'questions'. "
+        "The title and description must summarize the video in German. "
+        "Each question must contain 'question_title', 'question_options' "
+        "(exactly 4 non-empty strings) and 'answer' "
+        "(the exact text of the correct option). "
         f"Transcript:\n{transcript}"
     )
-    return prompt
 
 
 def generate_questions(transcript):
@@ -35,13 +33,13 @@ def generate_questions(transcript):
     prompt = build_quiz_prompt(transcript)
     with get_gemini_client() as client:
         response = client.models.generate_content(
-            model='gemini-3.5-flash',
+            model="gemini-3.5-flash-lite",
             contents=prompt,
             config={'response_mime_type': 'application/json'},
         )
     data = json.loads(response.text)
     validate_questions(data)
-    return data['questions']
+    return data
 
 
 def validate_options(options):
@@ -69,6 +67,10 @@ def validate_questions(data, question_count=10):
     """Validate the structure of generated quiz questions."""
     if not isinstance(data, dict):
         raise ValueError('Gemini returned an invalid response.')
+    for field in ('title', 'description'):
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f'Gemini returned an invalid {field}.')
     questions = data.get('questions')
     if not isinstance(questions, list) or len(questions) != question_count:
         raise ValueError('Gemini returned an invalid number of questions.')
@@ -123,15 +125,15 @@ def get_whisper_model():
 
 
 @transaction.atomic
-def save_quiz(user, video_url, questions):
-    """Save a generated quiz and its questions atomically."""
+def save_quiz(user, video_url, quiz_data):
+    """Save generated quiz details and questions atomically."""
     quiz = Quiz.objects.create(
         user=user,
-        title='Generiertes Quiz',
-        description='',
+        title=quiz_data['title'],
+        description=quiz_data['description'],
         video_url=video_url,
     )
-    for question in questions:
+    for question in quiz_data['questions']:
         Question.objects.create(quiz=quiz, **question)
     return quiz
 

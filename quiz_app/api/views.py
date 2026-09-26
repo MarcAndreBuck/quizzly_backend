@@ -1,3 +1,4 @@
+import logging
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -30,8 +31,10 @@ class QuizViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated & IsOwner]
 
     def get_queryset(self):
-        """Return only the current user's quizzes."""
-        return Quiz.objects.filter(user=self.request.user)
+        """Filter lists by owner and check detail access via permissions."""
+        if self.action == 'list':
+            return Quiz.objects.filter(user=self.request.user)
+        return Quiz.objects.all()
 
     def get_serializer_class(self):
         """Select the serializer for the current action."""
@@ -43,7 +46,10 @@ class QuizViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def handle_generation_error(exc):
-        """Convert expected generation failures into API errors."""
+        """Log the original error and return an API error."""
+        logging.getLogger(__name__).exception(
+            "Quiz generation failed."
+        )
         if isinstance(exc, ClientError):
             raise QuizGenerationError(
                 'Quiz generation failed. Please check the Gemini configuration.'
@@ -61,3 +67,14 @@ class QuizViewSet(viewsets.ModelViewSet):
         except (DownloadError, ClientError, ServerError, RuntimeError, ValueError) as exc:
             self.handle_generation_error(exc)
         return Response(QuizSerializer(quiz).data, status=201)
+
+    def update(self, request, *args, **kwargs):
+        """Update a quiz and return its complete details."""
+        partial = kwargs.pop('partial', False)
+        quiz = self.get_object()
+        serializer = self.get_serializer(
+            quiz, data=request.data, partial=partial
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(QuizSerializer(quiz).data)
