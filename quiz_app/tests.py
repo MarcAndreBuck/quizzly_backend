@@ -254,3 +254,101 @@ class QuizAccessTests(TestCase):
         client.force_authenticate(user=other)
         response = client.get(f'/api/quizzes/{quiz.id}/')
         self.assertEqual(response.status_code, 404)
+
+
+class QuizListTests(TestCase):
+    """Test listing quizzes through the API."""
+
+    def setUp(self):
+        """Create users, quizzes and an authenticated client."""
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(username='listuser')
+        self.other = user_model.objects.create_user(username='otheruser')
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+        Quiz.objects.create(
+            user=self.user,
+            title='Eigenes Quiz',
+            description='',
+            video_url='https://youtu.be/own',
+        )
+        Quiz.objects.create(
+            user=self.other,
+            title='Fremdes Quiz',
+            description='',
+            video_url='https://youtu.be/other',
+        )
+
+    def test_list_returns_only_own_quizzes(self):
+        """Return only quizzes belonging to the authenticated user."""
+        response = self.client.get('/api/quizzes/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['title'], 'Eigenes Quiz')
+
+    def test_retrieve_returns_own_quiz(self):
+        """Return a quiz belonging to the authenticated user."""
+        quiz = Quiz.objects.get(title='Eigenes Quiz')
+
+        response = self.client.get(f'/api/quizzes/{quiz.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['title'], 'Eigenes Quiz')
+
+    def test_update_changes_own_quiz(self):
+        """Update a quiz belonging to the authenticated user."""
+        quiz = Quiz.objects.get(title='Eigenes Quiz')
+
+        response = self.client.patch(
+            f'/api/quizzes/{quiz.id}/',
+            {'title': 'Geändertes Quiz'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        quiz.refresh_from_db()
+        self.assertEqual(quiz.title, 'Geändertes Quiz')
+
+    def test_delete_removes_own_quiz(self):
+        """Delete a quiz belonging to the authenticated user."""
+        quiz = Quiz.objects.get(title='Eigenes Quiz')
+
+        response = self.client.delete(f'/api/quizzes/{quiz.id}/')
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Quiz.objects.filter(id=quiz.id).exists())
+
+    def test_user_cannot_update_another_users_quiz(self):
+        """Prevent updating another user's quiz."""
+        owner = get_user_model().objects.create_user(username='updateowner')
+        quiz = Quiz.objects.create(
+            user=owner,
+            title='Fremdes Quiz',
+            description='',
+            video_url='https://youtu.be/test',
+        )
+
+        response = self.client.patch(
+            f'/api/quizzes/{quiz.id}/',
+            {'title': 'Manipuliert'},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        quiz.refresh_from_db()
+        self.assertEqual(quiz.title, 'Fremdes Quiz')
+
+    def test_user_cannot_delete_another_users_quiz(self):
+        """Prevent deleting another user's quiz."""
+        owner = get_user_model().objects.create_user(username='deleteowner')
+        quiz = Quiz.objects.create(
+            user=owner,
+            title='Fremdes Quiz',
+            description='',
+            video_url='https://youtu.be/test',
+        )
+
+        response = self.client.delete(f'/api/quizzes/{quiz.id}/')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Quiz.objects.filter(id=quiz.id).exists())
