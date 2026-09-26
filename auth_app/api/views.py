@@ -9,10 +9,11 @@ from .authentication import CookieJWTAuthentication
 from .serializers import LoginSerializer, RegistrationSerializer
 from .utils import (
     create_login_response,
+    create_logout_response,
     create_refresh_error_response,
     create_refresh_response,
-    delete_jwt_cookies,
     get_valid_refresh_token,
+    revoke_access_token,
     set_jwt_cookies,
 )
 
@@ -66,12 +67,9 @@ class LogoutView(APIView):
             token = RefreshToken(refresh_token)
             token.blacklist()
 
-        response = Response(
-            {'detail': 'Logout successful!'},
-            status=status.HTTP_200_OK,
-        )
-        delete_jwt_cookies(response)
-        return response
+        revoke_access_token(request.auth)
+
+        return create_logout_response()
 
 
 class TokenRefreshView(APIView):

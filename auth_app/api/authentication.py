@@ -1,4 +1,7 @@
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.exceptions import AuthenticationFailed
+
+from auth_app.models import RevokedAccessToken
 
 
 class CookieJWTAuthentication(JWTAuthentication):
@@ -10,4 +13,9 @@ class CookieJWTAuthentication(JWTAuthentication):
         if raw_token is None:
             return None
         validated_token = self.get_validated_token(raw_token)
+
+        if RevokedAccessToken.objects.filter(
+            jti=validated_token['jti']
+        ).exists():
+            raise AuthenticationFailed('Token has been revoked.')
         return self.get_user(validated_token), validated_token

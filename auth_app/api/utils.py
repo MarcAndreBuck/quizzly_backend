@@ -1,6 +1,10 @@
-from rest_framework.response import Response
+from datetime import datetime, timezone
+
 from rest_framework import status
+from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from auth_app.models import RevokedAccessToken
 
 
 def set_jwt_cookies(response, refresh):
@@ -17,7 +21,7 @@ def create_login_response(user):
     """Create the response for a successful login."""
 
     data = {
-        'detail': 'Login successful!',
+        'detail': 'Login successfully!',
         'user': {
             'id': user.id,
             'username': user.username,
@@ -62,8 +66,33 @@ def create_refresh_response(refresh):
     """Create a response with a refreshed access token."""
     access_token = refresh.access_token
     response = Response(
-        {'detail': 'Token refreshed successfully!'},
+        {'detail': 'Token refreshed'},
         status=status.HTTP_200_OK,
     )
     set_access_token_cookie(response, access_token)
+    return response
+
+
+def revoke_access_token(token):
+    """Record an access token as revoked until it expires."""
+    RevokedAccessToken.objects.get_or_create(
+        jti=token['jti'],
+        defaults={
+            'expires_at': datetime.fromtimestamp(token['exp'], tz=timezone.utc)
+        },
+    )
+
+
+def create_logout_response():
+    """Create the logout response and clear both JWT cookies."""
+    response = Response(
+        {
+            'detail': (
+                'Log-Out successfully! All Tokens will be deleted. '
+                'Refresh token is now invalid.'
+            )
+        },
+        status=status.HTTP_200_OK,
+    )
+    delete_jwt_cookies(response)
     return response
